@@ -164,8 +164,17 @@ for msg in st.session_state.messages:
 
 # --- 5. Handle User Input and Agent Communication ---
 
+# FIX 1: Initialize 'answer' and other variables in the GLOBAL SCOPE.
+# This prevents NameError during Streamlit's initial run (when prompt is empty).
+answer = "" 
+final_message_content = ""
+stored_codes = [] 
+code_block_pattern_full = r"```(sql|json|markdown)\n(.*?)```" 
+
 prompt = st.chat_input("Describe the database schema you want to design...")
 
+
+# THE ENTIRE EXECUTION, DISPLAY, AND STORAGE LOGIC MUST BE INSIDE THIS BLOCK
 if prompt:
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
@@ -177,122 +186,95 @@ if prompt:
             if msg["role"] == "user":
                 messages.append(HumanMessage(content=msg["content"]))
             elif msg["role"] == "assistant":
-                # Jika pesan sebelumnya punya ddl_code, tambahkan content (answer) saja.
                 messages.append(AIMessage(content=msg["content"]))
 
         with st.spinner("Processing with AI-Dope..."):
             response = st.session_state.agent.invoke({"messages": messages})
             
             final_message = response["messages"][-1]
-            answer = str(final_message.content) # Mulai dengan representasi string penuh
+            answer = str(final_message.content) # Defined here if successful
 
-            # --- TAHAP 1: EKSTRAKSI UTAMA DARI OBJEK MENTAH ---
-            # Jika output adalah list (sering terjadi pada tool output), gabungkan
+            # --- STAGE 1, 2, 3: (The long string cleanup logic) ---
+            
+            # Stage 1: Primary Extraction
             if isinstance(final_message.content, list):
                 answer = " ".join([str(item) for item in final_message.content])
-            # Jika output berupa AIMessage object, coba ambil property 'text' (hanya sebagai fallback)
             elif hasattr(final_message, 'text') and final_message.text:
                 answer = final_message.text
                 
-            
-            # --- TAHAP 2: PEMBERSIHAN METADATA/SIGNATURE ---
-            
-            # Pola 1: Hapus string panjang 'extras': {'signature': 'CrQkAdHtim...'}
-            # Ini mengatasi masalah di screenshot image_5445c4
+            # Stage 2: Metadata/Signature Cleanup (Removes garbage text)
             answer = re.sub(r"'extras':\s*\{\'signature\':\s*\'[^\']+\'\}", "", answer)
-            
-            # Pola 2: Hapus sisa-sisa objek dict/JSON mentah, misal: {'type': 'text', 'text': '...'}
             answer = re.sub(r"\{\'type\':\s*\'text\',\s*\'text\':\s*\'?([^\}]+)\'?\}", r'\1', answer, flags=re.DOTALL)
-            
-            # Pola 3: Hapus sisa-sisa karakter \n yang tidak perlu setelah cleanup
             answer = re.sub(r'\\n', '\n', answer) 
-            answer = answer.replace("}}", "") # Hapus kurung kurawal sisa
-            answer = answer.strip()
-            
-            # --- TAHAP 3: PEMBERSIHAN OUTPUT REPORT PADAT (Masalah Formatting di image_664046) ---
-            # Cari pola Estimasi padat: OLTP|number ms|number min OLAP|...
-            # Ini sering terjadi karena LangChain tidak bisa menampilkan Markdown di tengah tool output.
-            
-            # Kita coba format ulang bagian Estimasi Performance menjadi list yang rapi:
+            answer = answer.replace("}}", "").strip()
+
+            # Stage 3: Performance Report Cleanup
             if "ESTIMATION FOR PROPOSED TYPE" in answer:
-                # Ambil bagian string yang berisi data performa (mulai dari 'OLTP|...')
                 estimation_match = re.search(r'(OLTP\|[^ ]+.*?min)\s*(STREAM\|[^ ]+.*?min)', answer, re.DOTALL)
                 if estimation_match:
-                    # Ambil kedua blok data performa
                     data_block = estimation_match.group(1) + " " + estimation_match.group(2)
-                    
-                    # Pisahkan setiap tipe (OLTP, OLAP, HTAP, etc.)
                     parts = re.findall(r'([A-Z]+)\s*\|\s*([^|]+?)\s*\|\s*([^ ]+)', data_block)
-                    
                     if parts:
                         new_estimation_list = []
                         for proc_type, latency, throughput in parts:
                             new_estimation_list.append(f"- **{proc_type}**: Latency: {latency.strip()} / Throughput: {throughput.strip()}")
-                        
-                        # Ganti string yang bermasalah dengan list yang sudah diformat
                         answer = answer.replace(estimation_match.group(0), "\n\n" + "\n".join(new_estimation_list) + "\n\n")
 
             final_message_content = answer.strip()
 
     except Exception as e:
-        final_message_content = f"An error occurred during agent execution: {e}"
+        # FIX 2: Define 'answer' in the except block to ensure it's not undefined later
+        error_message = f"Execution Error: An error occurred during agent execution: {e}. Please simplify your request."
+        answer = error_message
+        final_message_content = error_message
+        
+        with st.chat_message("assistant"):
+            st.error(error_message)
 
-    # --- INITIALIZE LISTS ---
-    stored_codes = [] 
 
-    # 3. Display the assistant's response.
-    with st.chat_message("assistant"):
+    # --- DISPLAY LOGIC (Now safely inside the 'if prompt:' block) ---
+    
+    # Only proceed with display if the answer is not an internal error message
+    if answer and not answer.startswith("Execution Error:"):
         
-        # Regex to find all code blocks (SQL, JSON, or MARKDOWN)
-        code_block_pattern_full = r"```(sql|json|markdown)\n(.*?)```" 
-        
-        # Split the text (explanation) based on code blocks
-        explanation_segments = re.split(code_block_pattern_full, answer, flags=re.DOTALL)
-        
-        i = 0
-        while i < len(explanation_segments):
+        stored_codes = [] 
+
+        # 3. Display the assistant's response.
+        with st.chat_message("assistant"):
             
-            # Display Explanation Text 
-            segment = explanation_segments[i]
-            if segment and segment.strip():
-                st.markdown(segment.strip())
+            # Split the text (explanation) based on code blocks
+            explanation_segments = re.split(code_block_pattern_full, answer, flags=re.DOTALL)
             
-            # Move to Language Tag 
-            i += 1
-            if i < len(explanation_segments):
-                lang_tag = explanation_segments[i].strip()
+            i = 0
+            while i < len(explanation_segments):
                 
-                # Move to Code Content 
+                # Display Explanation Text 
+                segment = explanation_segments[i]
+                if segment and segment.strip():
+                    st.markdown(segment.strip())
+                
                 i += 1
                 if i < len(explanation_segments):
-                    code_content_raw = explanation_segments[i]
-                    code_content = code_content_raw.strip()
-                    
-                    if code_content:
+                    lang_tag = explanation_segments[i].strip()
+                    i += 1
+                    if i < len(explanation_segments):
+                        code_content_raw = explanation_segments[i]
+                        code_content = code_content_raw.strip()
                         
-                        # --- LOGIC: SQL ORDERING (Applies to DDL, skips DML and MARKDOWN) ---
-                        final_display_content = code_content
-                        if lang_tag.lower() == 'sql':
-                            # Call the DML-safe ordering function
-                            final_display_content = order_sql_commands(code_content)
-                            
-                        # If the block is markdown (from the DML tool), display it as a code block for easy copy-paste
-                        display_lang = 'markdown' if lang_tag.lower() == 'markdown' else lang_tag.lower()
-                        
-                        st.code(final_display_content, language=display_lang)
-                        
-                        # Store the clean original content (without ordering comments) to history
-                        stored_codes.append(code_content)
-                
-            # Move to the next Explanation Text
-            i += 1
+                        if code_content:
+                            final_display_content = code_content
+                            if lang_tag.lower() == 'sql':
+                                # This function must be imported at the top: from database_tools import order_sql_commands
+                                final_display_content = order_sql_commands(code_content) 
+                                
+                            display_lang = 'markdown' if lang_tag.lower() == 'markdown' else lang_tag.lower()
+                            st.code(final_display_content, language=display_lang)
+                            stored_codes.append(code_content)
+                    i += 1
 
-
-    # 4. Add the assistant's response to the message history list (for memory)
-    msg_to_store = {"role": "assistant", "content": final_message_content}
-    
-    # Store all code content (SQL and JSON) for clean display in history
-    if stored_codes:
-        msg_to_store["ddl_code"] = "\n\n---\n\n".join(stored_codes)
-        
-    st.session_state.messages.append(msg_to_store)
+        # 4. Add the assistant's response to the message history list (for memory)
+        if final_message_content:
+            msg_to_store = {"role": "assistant", "content": final_message_content}
+            if stored_codes:
+                msg_to_store["ddl_code"] = "\n\n---\n\n".join(stored_codes)
+            st.session_state.messages.append(msg_to_store)
