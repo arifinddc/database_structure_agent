@@ -177,42 +177,61 @@ if prompt:
             if msg["role"] == "user":
                 messages.append(HumanMessage(content=msg["content"]))
             elif msg["role"] == "assistant":
-                messages.append(AIMessage(content=msg["content"])) 
+                # Jika pesan sebelumnya punya ddl_code, tambahkan content (answer) saja.
+                messages.append(AIMessage(content=msg["content"]))
 
-        with st.spinner("Designing schema and consulting..."):
+        with st.spinner("Processing with AI-Dope..."):
             response = st.session_state.agent.invoke({"messages": messages})
             
             final_message = response["messages"][-1]
-            
-            # 1. Cek apakah content adalah string biasa (preferred)
-            if isinstance(final_message.content, str):
-                answer = final_message.content
-            # 2. Jika content adalah list (misalnya tool output), gabungkan
-            elif isinstance(final_message.content, list):
+            answer = str(final_message.content) # Mulai dengan representasi string penuh
+
+            # --- TAHAP 1: EKSTRAKSI UTAMA DARI OBJEK MENTAH ---
+            # Jika output adalah list (sering terjadi pada tool output), gabungkan
+            if isinstance(final_message.content, list):
                 answer = " ".join([str(item) for item in final_message.content])
-            # 3. Handle jika output adalah AIMessage, tapi content-nya string kosong,
-            #    dan pesan sebenarnya ada di 'kwargs'/'text' (jarang, tapi safeguard)
+            # Jika output berupa AIMessage object, coba ambil property 'text' (hanya sebagai fallback)
             elif hasattr(final_message, 'text') and final_message.text:
                 answer = final_message.text
-            else:
-                # Fallback: gunakan representasi string dari message object (bersihkan output jika ada)
-                answer = str(final_message.content)
-
-            # Khusus untuk output Gemini/LangChain yang menyertakan 'type' dict di awal:
-            # Jika 'answer' masih berupa string JSON mentah, coba ekstrak 'text'
-            try:
-                if answer.startswith("{") and '"text"' in answer:
-                    temp_dict = json.loads(answer.replace('\n', ''))
-                    if 'text' in temp_dict:
-                        answer = temp_dict['text']
-            except json.JSONDecodeError:
-                pass 
                 
-            # Final Clean-up: Hapus semua karakter non-teks yang tidak perlu (seperti \n atau metadata)
-            # Ini sangat penting untuk menghilangkan teks aneh (CoolAdHtim...)
-            answer = re.sub(r"\{\'type\':\s*\'text\',\s*\'text\':\s*\'?([^\}]+)\'?\}", r'\1', answer, flags=re.DOTALL)
-            answer = re.sub(r'\\n', '\n', answer) # Perbaiki line breaks
             
+            # --- TAHAP 2: PEMBERSIHAN METADATA/SIGNATURE ---
+            
+            # Pola 1: Hapus string panjang 'extras': {'signature': 'CrQkAdHtim...'}
+            # Ini mengatasi masalah di screenshot image_5445c4
+            answer = re.sub(r"'extras':\s*\{\'signature\':\s*\'[^\']+\'\}", "", answer)
+            
+            # Pola 2: Hapus sisa-sisa objek dict/JSON mentah, misal: {'type': 'text', 'text': '...'}
+            answer = re.sub(r"\{\'type\':\s*\'text\',\s*\'text\':\s*\'?([^\}]+)\'?\}", r'\1', answer, flags=re.DOTALL)
+            
+            # Pola 3: Hapus sisa-sisa karakter \n yang tidak perlu setelah cleanup
+            answer = re.sub(r'\\n', '\n', answer) 
+            answer = answer.replace("}}", "") # Hapus kurung kurawal sisa
+            answer = answer.strip()
+            
+            # --- TAHAP 3: PEMBERSIHAN OUTPUT REPORT PADAT (Masalah Formatting di image_664046) ---
+            # Cari pola Estimasi padat: OLTP|number ms|number min OLAP|...
+            # Ini sering terjadi karena LangChain tidak bisa menampilkan Markdown di tengah tool output.
+            
+            # Kita coba format ulang bagian Estimasi Performance menjadi list yang rapi:
+            if "ESTIMATION FOR PROPOSED TYPE" in answer:
+                # Ambil bagian string yang berisi data performa (mulai dari 'OLTP|...')
+                estimation_match = re.search(r'(OLTP\|[^ ]+.*?min)\s*(STREAM\|[^ ]+.*?min)', answer, re.DOTALL)
+                if estimation_match:
+                    # Ambil kedua blok data performa
+                    data_block = estimation_match.group(1) + " " + estimation_match.group(2)
+                    
+                    # Pisahkan setiap tipe (OLTP, OLAP, HTAP, etc.)
+                    parts = re.findall(r'([A-Z]+)\s*\|\s*([^|]+?)\s*\|\s*([^ ]+)', data_block)
+                    
+                    if parts:
+                        new_estimation_list = []
+                        for proc_type, latency, throughput in parts:
+                            new_estimation_list.append(f"- **{proc_type}**: Latency: {latency.strip()} / Throughput: {throughput.strip()}")
+                        
+                        # Ganti string yang bermasalah dengan list yang sudah diformat
+                        answer = answer.replace(estimation_match.group(0), "\n\n" + "\n".join(new_estimation_list) + "\n\n")
+
             final_message_content = answer.strip()
 
     except Exception as e:
