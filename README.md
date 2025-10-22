@@ -54,7 +54,7 @@ Follow these steps to run the project on your local machine:
 
 1.  **Clone the Repository:**
     ```bash
-    git clone [https://github.com/arifinddc/database_structure_agent](https://github.com/arifinddc/database_structure_agent) # Replace with your repo link
+    git clone https://github.com/arifinddc/database_structure_agent
     cd database_structure_agent
     ```
 2.  **Install Dependencies:**
@@ -69,4 +69,5 @@ Follow these steps to run the project on your local machine:
 4.  **Run the Application:**
     ```bash
     streamlit run schema_designer_app.py
+
     ```
