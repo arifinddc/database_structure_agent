@@ -1,0 +1,13 @@
+# requirements.txt
+
+streamlit
+matplotlib
+google-genai>=1.0.0
+langchain-google-genai>=2.1.0
+langgraph>=0.0.30
+langchain>=0.1.0
+
+# RECOMMENDED ADDITION FOR ROBUST DATA/TABLE HANDLING
+# Although not strictly used in the current version of database_tools.py,
+# it is standard practice for Streamlit apps dealing with tabular data.
+pandas
