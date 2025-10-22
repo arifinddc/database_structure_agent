@@ -183,16 +183,40 @@ if prompt:
             response = st.session_state.agent.invoke({"messages": messages})
             
             final_message = response["messages"][-1]
-            final_message_content = final_message.content
-
-            if isinstance(final_message_content, list):
-                answer = " ".join([str(item) for item in final_message_content])
+            
+            # 1. Cek apakah content adalah string biasa (preferred)
+            if isinstance(final_message.content, str):
+                answer = final_message.content
+            # 2. Jika content adalah list (misalnya tool output), gabungkan
+            elif isinstance(final_message.content, list):
+                answer = " ".join([str(item) for item in final_message.content])
+            # 3. Handle jika output adalah AIMessage, tapi content-nya string kosong,
+            #    dan pesan sebenarnya ada di 'kwargs'/'text' (jarang, tapi safeguard)
+            elif hasattr(final_message, 'text') and final_message.text:
+                answer = final_message.text
             else:
-                answer = str(final_message_content)
+                # Fallback: gunakan representasi string dari message object (bersihkan output jika ada)
+                answer = str(final_message.content)
+
+            # Khusus untuk output Gemini/LangChain yang menyertakan 'type' dict di awal:
+            # Jika 'answer' masih berupa string JSON mentah, coba ekstrak 'text'
+            try:
+                if answer.startswith("{") and '"text"' in answer:
+                    temp_dict = json.loads(answer.replace('\n', ''))
+                    if 'text' in temp_dict:
+                        answer = temp_dict['text']
+            except json.JSONDecodeError:
+                pass 
+                
+            # Final Clean-up: Hapus semua karakter non-teks yang tidak perlu (seperti \n atau metadata)
+            # Ini sangat penting untuk menghilangkan teks aneh (CoolAdHtim...)
+            answer = re.sub(r"\{\'type\':\s*\'text\',\s*\'text\':\s*\'?([^\}]+)\'?\}", r'\1', answer, flags=re.DOTALL)
+            answer = re.sub(r'\\n', '\n', answer) # Perbaiki line breaks
+            
+            final_message_content = answer.strip()
 
     except Exception as e:
-        answer = f"An error occurred during agent execution: {e}"
-        final_message_content = answer
+        final_message_content = f"An error occurred during agent execution: {e}"
 
     # --- INITIALIZE LISTS ---
     stored_codes = [] 
