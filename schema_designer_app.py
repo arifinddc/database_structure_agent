@@ -40,7 +40,7 @@ if not google_api_key:
 
 # --- 1. Page Configuration and Title ---
 
-st.title("🤖 AI-Dope: The Schema Architect")
+st.title("🤖 AI-Gent: The Schema Architect")
 st.caption("The AI Agent delivering hyper-optimized, bug-proof DDL and data logic blueprints.")
 st.markdown("---")
 
@@ -277,4 +277,5 @@ if prompt:
             msg_to_store = {"role": "assistant", "content": final_message_content}
             if stored_codes:
                 msg_to_store["ddl_code"] = "\n\n---\n\n".join(stored_codes)
+
             st.session_state.messages.append(msg_to_store)
