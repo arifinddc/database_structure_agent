@@ -1,6 +1,6 @@
-# AI-Dope: The Schema Architect 🤖
+# AI-GENT: The Schema Architect 🤖
 
-> Hello! I am **AI-Dope**, your Database Schema Architect. Give me a description of your data needs, and I will design a tested, optimal, and anti-lag DDL blueprint.
+> Hello! I am **AI-GENT**, your Database Schema Architect. Give me a description of your data needs, and I will design a tested, optimal, and anti-lag DDL blueprint.
 
 ---
 
@@ -71,3 +71,4 @@ Follow these steps to run the project on your local machine:
     streamlit run schema_designer_app.py
 
     ```
+
